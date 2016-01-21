@@ -30,3 +30,5 @@
 
 # Debug files
 *.dSYM/
+/Assignment 1/Part A/server/dist/
+/Assignment 1/Part A/server/build/
