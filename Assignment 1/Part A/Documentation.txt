@@ -8,6 +8,13 @@ Jan 20, 2016
 
 Design
 
+Functionality
+- goes beyond assignment requirements
+	- persistent and non-persistent connections
+	- supports concurrency (the information operations are not optimized for concurrency though, single semaphore)
+	- should support ipv6 (but not tested)
+
+
 Client side uses netcat to send message
  - Test files included are:
  		- data 							- seed data to use for testing
@@ -17,18 +24,29 @@ Client side uses netcat to send message
  		- remove_test				- remove operation tests
 
 Example operations are described below
-	- add 			- echo add 1 message | netcat 127.0.0.1 30100
-	- get				- echo get 1 | netcat 127.0.0.1 30100 
-	- getall 		- echo getall | netcat 127.0.0.1 30100
-	- remove		- echo remove 1 | netcat 127.0.0.1 30100  
+	- once connected, e.g. netcat 127.0.0.1 30100
+	- add 			- add 1 message
+	- get				- get 1
+	- getall 		- getall
+	- remove		- remove 1
 	
 Proxy
 	- Proxy.c
 	- Usage ./proxy [proxy listen port] [proxy destination address] [proxy destination port]
 	- ex. ./proxy 30100 127.0.0.1 30200
+	- Connection to proxy from netcat is persistent
+	- Connection between proxy and server is non-persistent
+	- netcat connections are forked into per connection persistent processes (supports multiple connections)
 
 Server
 	- Server.c
 	- Usage ./server [server listen port]
 	- ex. ./server 30200
+	- incoming connections whether from proxy or netcat are forked into
+	- connection from netcat will be persistent,
+	- connection from proxy will be non-persistent
 
+
+limitations
+	- code readability is an issue, as tcp socket code is hard to split into seperate chunks
+	- attempts were made to try refactor some, but readability did not seem to improve

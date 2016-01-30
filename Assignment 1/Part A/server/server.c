@@ -21,16 +21,34 @@
 
 #define BACKLOG 10
 #define MAXDATASIZE 221 /* max number of char we can get at once [10] + [10] + [200] + '\0' */
+#define COMMANDSIZE 10
+#define KEYSIZE 10
+#define VALUESIZE 200
+
+typedef struct data_container data_container;
+
+struct data_container {
+    char* key; 
+    char* value;
+    data_container* next;
+};
 
 void sigchld_handler(int s);
 void *get_in_addr(struct sockaddr *sa);
 int start_tcp(char * argv[], struct sockaddr_storage *their_addr);
+int parse_message(char* buf[], char* reply[]);
+
+data_container GL_head;
 
 /*
  * 
  */
 int main(int argc, char** argv) {
 
+    GL_head.key = NULL;
+    GL_head.value = NULL;
+    GL_head.next = NULL;
+    
     if (argc != 2) {
         fprintf(stderr, "usage: [server listen port]\n");
         exit(1);
@@ -172,8 +190,59 @@ void *get_in_addr(struct sockaddr *sa) {
 
 int parse_message(char* buf[], char* reply[]) {
     printf("server: got message = %s \n", *buf);
-    strcpy(*reply, *buf);
-    *reply[0] = 'Y';
-    printf("server: send message = %s \n", *reply);
+
+    char errormsg[] = "Bad Query or oversized\n";
+    char* command;
+    char* key;
+    char* value;
+    char* save;
+
+
+
+
+    command = strtok_r(*buf, " ", &save);
+    key = strtok_r(NULL, " ", &save);
+    value = strtok_r(NULL, "\0", &save);
+
+    if (command == NULL || key == NULL || value == NULL) {
+        strcpy(*reply, errormsg);
+        printf("sending error\n");
+        return 0;
+    }
+
+
+    printf("%s length %lu\n", command, strlen(command));
+    printf("%s length %lu\n", key, strlen(key));
+    printf("%s length %lu\n", value, strlen(value));
+
+
+
+    if ((strlen(command) > COMMANDSIZE) || (strlen(key) > KEYSIZE) || (strlen(value) > VALUESIZE)) {
+        strcpy(*reply, errormsg);
+        printf("sending error\n");
+        return 0;
+    }
+
+
     return 0;
 }
+
+int add_function(){
+    return 0;
+}
+
+int getvalue_function(){
+    return 0;
+}
+
+int getall_function(){
+    return 0;
+}
+
+int remove_function(){
+    return 0;
+}
+
+
+
+
