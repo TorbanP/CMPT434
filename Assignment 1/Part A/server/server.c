@@ -112,27 +112,38 @@ int main(int argc, char** argv) {
 
         if (!fork()) { /* this is the child process */
 
-            char* buf = malloc(sizeof(char) * MAXDATASIZE);
-
+            char* buf = malloc(sizeof (char) * MAXDATASIZE);
+            char* reply = malloc(sizeof (char) * MAXDATASIZE);
             int numbytes;
+            
+            while (1) {
+                if ((numbytes = recv(new_fd, buf, MAXDATASIZE, 0)) == -1) {
+                    perror("recv");
+                    free(buf);
+                    free(reply);
+                    close(new_fd);
+                    exit(1);
+                }
+                if (numbytes == 0) {
+                    free(buf);
+                    free(reply);
+                    close(new_fd);
+                    exit(0);
+                } else {
+                    buf[numbytes - 1] = '\0';
+                    char* reply = malloc(sizeof (char) * MAXDATASIZE);
+                    if (parse_message(&buf, &reply) == -1) {
+                        perror("parse message");
+                    }
 
-            if ((numbytes = recv(new_fd, buf, MAXDATASIZE - 1, 0)) == -1) {
-                perror("recv");
-                exit(1);
+                    if (send(new_fd, reply, MAXDATASIZE, 0) == -1)
+                        perror("send");
+                }
             }
-            //buf[numbytes - 1] = '\0';
-            printf("server: got message from %s = %s \n", s, buf);
-
-            close(new_fd);
-            exit(0);
         }
         close(new_fd); /* parent doesn't need this */
     }
 
-
-    
-
-    
     return (EXIT_SUCCESS);
 }
 
@@ -157,4 +168,12 @@ void *get_in_addr(struct sockaddr *sa) {
     }
 
     return &(((struct sockaddr_in6*) sa)->sin6_addr);
+}
+
+int parse_message(char* buf[], char* reply[]) {
+    printf("server: got message = %s \n", *buf);
+    strcpy(*reply, *buf);
+    *reply[0] = 'Y';
+    printf("server: send message = %s \n", *reply);
+    return 0;
 }

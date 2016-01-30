@@ -36,7 +36,7 @@ int main(int argc, char* argv[]) {
         fprintf(stderr, "usage: [proxy listen port] [proxy destination IP] [proxy destination port]\n");
         exit(1);
     }
-    
+
     int sockfd;
     int new_fd; /* listen on sock_fd, new connection on new_fd */
     struct addrinfo hints, *servinfo, *p;
@@ -112,27 +112,30 @@ int main(int argc, char* argv[]) {
         printf("proxy: got connection from %s\n", s);
 
         if (!fork()) { /* this is the child process */
-            
-            char* buf = malloc(sizeof(char) * MAXDATASIZE);
-
-            
+            char* buf = malloc(sizeof (char) * MAXDATASIZE);
             int numbytes;
-            
-            if ((numbytes = recv(new_fd, buf, MAXDATASIZE - 1, 0)) == -1) {
-                perror("recv");
-                exit(1);
+            while (1) {
+                if ((numbytes = recv(new_fd, buf, MAXDATASIZE - 1, 0)) == -1) {
+                    perror("recv");
+                    free(buf);
+                    exit(1);
+                }
+                if (numbytes == 0) {
+                    perror("closed connection");
+                    close(new_fd);
+                    free(buf);
+                    exit(0);
+                }
+                buf[numbytes - 1] = '\0';
+                printf("proxy: got message from %s = %s \n", s, buf);
+                send_to_server(&buf, argv);
+
+                if (send(new_fd, buf, MAXDATASIZE, 0) == -1)
+                    perror("send");
             }
-            buf[numbytes-1] = '\0';
-            printf("proxy: got message from %s = %s \n", s, buf);
-            
-            send_to_server(&buf, argv);
-
-            close(new_fd);
-            exit(0);
         }
-        close(new_fd); /* parent doesn't need this */
     }
-
+    close(new_fd); /* parent doesn't need this */
 
     return (EXIT_SUCCESS);
 }
@@ -160,11 +163,10 @@ void *get_in_addr(struct sockaddr *sa) {
     return &(((struct sockaddr_in6*) sa)->sin6_addr);
 }
 
-int send_to_server(char* buf[], char* argv[]) {
+int send_to_server(char* buf[], char* argv[]) {  
     
-    
-    printf("proxy: buf = %s\n", *buf);
-    int sockfd, numbytes;
+    int sockfd;
+    int numbytes;
     struct addrinfo hints, *servinfo, *p;
     int rv;
     char s[INET6_ADDRSTRLEN];
@@ -196,7 +198,7 @@ int send_to_server(char* buf[], char* argv[]) {
 
     if (p == NULL) {
         fprintf(stderr, "proxy: failed to connect\n");
-        return 2;
+        return -1;
     }
 
     inet_ntop(p->ai_family, get_in_addr((struct sockaddr *) p->ai_addr), s, sizeof s);
@@ -205,6 +207,12 @@ int send_to_server(char* buf[], char* argv[]) {
     
     if (send(sockfd, *buf, MAXDATASIZE, 0) == -1)
         perror("send");
+
+    if ((numbytes = recv(sockfd, *buf, MAXDATASIZE - 1, 0)) == -1) {
+        perror("recv");
+        return -1;
+    }
+    printf("recvd = %s\n", *buf);
 
     close(sockfd);
 
