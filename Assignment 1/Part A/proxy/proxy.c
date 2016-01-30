@@ -3,7 +3,7 @@
  * Author: TJP873
  * CMPT 434 - Assignment 1, Part A
  * Created on January 20, 2016, 6:21 PM
- * Some code based on http://beej.us/guide/bgnet/output/html/singlepage/bgnet.html
+ * code is heavily based on http://beej.us/guide/bgnet/output/html/singlepage/bgnet.html
  */
 
 #include <stdio.h>
@@ -202,9 +202,8 @@ int send_to_server(char* buf[], char* argv[]) {
     inet_ntop(p->ai_family, get_in_addr((struct sockaddr *) p->ai_addr), s, sizeof s);
 
     freeaddrinfo(servinfo); /* all done with this structure */
-
-
-    if (send(sockfd, *buf, sizeof(*buf), 0) == -1)
+    
+    if (send(sockfd, *buf, MAXDATASIZE, 0) == -1)
         perror("send");
 
     close(sockfd);
