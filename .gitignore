@@ -32,3 +32,5 @@
 *.dSYM/
 /Assignment 1/Part A/server/dist/
 /Assignment 1/Part A/server/build/
+/Assignment 1/Part A/proxy/build/
+/Assignment 1/Part A/proxy/dist/

@@ -17,14 +17,18 @@ Client side uses netcat to send message
  		- remove_test				- remove operation tests
 
 Example operations are described below
-	- add 			- echo add 1 message | netcat 127.0.0.1 30001
-	- get				- echo get 1 | netcat 127.0.0.1 30001
-	- getall 		- echo getall | netcat 127.0.0.1 30001
-	- remove		- echo remove 1 | netcat 127.0.0.1 30001  
+	- add 			- echo add 1 message | netcat 127.0.0.1 30100
+	- get				- echo get 1 | netcat 127.0.0.1 30100 
+	- getall 		- echo getall | netcat 127.0.0.1 30100
+	- remove		- echo remove 1 | netcat 127.0.0.1 30100  
 	
 Proxy
 	- Proxy.c
+	- Usage ./proxy [proxy listen port] [proxy destination address] [proxy destination port]
+	- ex. ./proxy 30100 127.0.0.1 30200
 
 Server
 	- Server.c
+	- Usage ./server [server listen port]
+	- ex. ./server 30200
 
