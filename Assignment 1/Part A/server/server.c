@@ -66,10 +66,9 @@ void *worker_thread(void *arg1);
 /* GLOBAL */
 sem_t GL_head_mutex;
 data_container GL_head;
-int debug = 0;
 
 /*
- * 
+ * main - listens via tcp, parses, and performs basic data storage operations
  */
 int main(int argc, char** argv) {
 
@@ -149,17 +148,18 @@ int main(int argc, char** argv) {
 
     printf("server: waiting for connections...\n");
     
+    /* prepare pthreads */
     pthread_t threads[THREADLIMIT];
     int thread_fd[THREADLIMIT];
     int thread_counter = 0;
     
-    
-    while (1) { /* main accept() loop */
+    /* main accept loop, listen and spawn thread on incoming connections */
+    while (1) {
         sin_size = sizeof their_addr;
         thread_fd[thread_counter] = accept(sockfd, (struct sockaddr *) &their_addr, &sin_size);
         if (thread_fd[thread_counter] == -1) {
             perror("accept");
-            continue;
+
         }
 
         inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *) &their_addr), s, sizeof s);
@@ -178,7 +178,6 @@ int main(int argc, char** argv) {
         }
         rc = pthread_detach(threads[thread_counter]);
         thread_counter++;
-
     }
     return (EXIT_SUCCESS);
 }
@@ -210,8 +209,6 @@ void *get_in_addr(struct sockaddr *sa) {
  * parse_message
  */
 enum operations parse_message(char* buf[], char* reply[], struct parsed_msg* current_msg) {
-    
-    debug++;
     
     char* command;
     char* key;
@@ -322,6 +319,8 @@ void remove_function(struct parsed_msg* current_msg) {
  * send_reply - send reply message back to connection
  */
 void send_reply(int new_fd, char* reply[]) {
+    
+    printf("server sending reply, %s\n", *reply);
     if (send(new_fd, *reply, strlen(*reply), 0) == -1)
         perror("send");
 }
@@ -331,41 +330,50 @@ void send_reply(int new_fd, char* reply[]) {
  */
 void *worker_thread(void *arg1) {
     
+    /* fd to use with client */
     int* new_fd = (int*)arg1;
-    
-    printf("worker thread, new_fd = %i\n", *new_fd);
-    
+    /* memory for all types of receives */
     char* buf = malloc(sizeof (char) * MAXDATASIZE);
-
     /* memory for all types of replies */
     char* reply = malloc(sizeof (char) * MAXDATASIZE);
+    /* error message stuff */
     char error_msg[] = "Bad Query or oversized\n";
     char* err1 = error_msg;
+    /* recv size */
     int numbytes;
-
+    
+    /* worker loop */
     while (1) {
+        /* listen for client message */
         if ((numbytes = recv(*new_fd, buf, MAXDATASIZE, 0)) == -1) {
             perror("recv");
             free(buf);
             free(reply);
             close(*new_fd);
-            exit(1);
+            pthread_exit(NULL);
         }
+        
         printf("recv msg = %s\n", buf);
+        
+        /* connection got closed, cleanup */
         if (numbytes == 0) {
-            continue;
             free(buf);
             free(reply);
             close(*new_fd);
-            exit(0);
+            pthread_exit(NULL);
+            
+        /* received a message */
         } else {
 
             buf[numbytes - 1] = '\0';
             char* reply = malloc(sizeof (char) * MAXDATASIZE);
             struct parsed_msg current_message;
             current_message.fd = *new_fd;
+            
+            /* validate and parse message*/
             enum operations ret = parse_message(&buf, &reply, &current_message);
-
+            
+            /* perform operations requested by message */
             switch (ret) {
                 case add_op: add_function(&current_message); break;
                 case getvalue_op: getvalue_function(&current_message); break;

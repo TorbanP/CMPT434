@@ -25,7 +25,8 @@
 
 void sigchld_handler(int s);
 void *get_in_addr(struct sockaddr *sa);
-int send_to_server(char* buf[], char* argv[]);
+int connect_to_server(char* argv[]);
+int send_reply(int new_fd, char* reply[]);
 
 /*
  * 
@@ -38,7 +39,7 @@ int main(int argc, char* argv[]) {
     }
 
     int sockfd;
-    int new_fd; /* listen on sock_fd, new connection on new_fd */
+    int client_fd; /* listen on sock_fd, new connection on new_fd */
     struct addrinfo hints, *servinfo, *p;
     struct sockaddr_storage their_addr; /* connector's address information */
     socklen_t sin_size;
@@ -102,8 +103,8 @@ int main(int argc, char* argv[]) {
 
     while (1) { /* main accept() loop */
         sin_size = sizeof their_addr;
-        new_fd = accept(sockfd, (struct sockaddr *) &their_addr, &sin_size);
-        if (new_fd == -1) {
+        client_fd = accept(sockfd, (struct sockaddr *) &their_addr, &sin_size);
+        if (client_fd == -1) {
             perror("accept");
             continue;
         }
@@ -114,28 +115,73 @@ int main(int argc, char* argv[]) {
         if (!fork()) { /* this is the child process */
             char* buf = malloc(sizeof (char) * MAXDATASIZE);
             int numbytes;
+            char error_msg[] = "Proxy-Server connection fault\n";
+            char* error_ptr = error_msg;
+            
+            /* connect to server, get server fd*/
+            int server_fd = connect_to_server(argv);
+            printf("proxy: got connection to server, fd = %li \n", s, server_fd);
+            /* child loop*/
             while (1) {
-                if ((numbytes = recv(new_fd, buf, MAXDATASIZE - 1, 0)) == -1) {
+                /* wait for message from client */
+                if ((numbytes = recv(client_fd, buf, MAXDATASIZE - 1, 0)) == -1) {
                     perror("recv");
                     free(buf);
                     exit(1);
                 }
+                
+                /* connection got closed, cleanup */
                 if (numbytes == 0) {
                     perror("closed connection");
-                    close(new_fd);
+                    close(client_fd);
+                    close(server_fd);
                     free(buf);
                     exit(0);
                 }
-                buf[numbytes - 1] = '\0';
+                buf[numbytes] = '\0';
+                
                 printf("proxy: got message from %s = %s \n", s, buf);
-                send_to_server(&buf, argv);
+                
+                /* Send message to server */
+                if (send_reply(server_fd, &buf)) {
+                    printf("proxy: sent message, %s \n", buf);
+                } else {
+                    send_reply(client_fd, error_ptr);
+                }
 
-                if (send(new_fd, buf, MAXDATASIZE, 0) == -1)
-                    perror("send");
+                /* listen for reply from server*/
+                if ((numbytes = recv(server_fd, buf, MAXDATASIZE - 1, 0)) == -1) {
+                    perror("recv");
+                    return -1;
+                }
+
+                /* connection got closed, cleanup */
+                if (numbytes == 0) {
+                    perror("closed connection");
+                    close(client_fd);
+                    close(server_fd);
+                    free(buf);
+                    exit(0);
+                }
+
+                printf("recvd = %s\n", buf);
+
+                /* Send message to client */
+                if (send_reply(client_fd, &buf)) {
+                    printf("proxy: sending message to client, %s \n", buf);
+                    
+                /* connection got closed, cleanup */
+                } else {
+                    perror("closed connection");
+                    close(client_fd);
+                    close(server_fd);
+                    free(buf);
+                    exit(0);
+                }
             }
         }
     }
-    close(new_fd); /* parent doesn't need this */
+    close(client_fd); /* parent doesn't need this */
 
     return (EXIT_SUCCESS);
 }
@@ -163,9 +209,9 @@ void *get_in_addr(struct sockaddr *sa) {
     return &(((struct sockaddr_in6*) sa)->sin6_addr);
 }
 
-int send_to_server(char* buf[], char* argv[]) {  
+int connect_to_server(char* argv[]) {  
     
-    int sockfd;
+    int sockfd ;
     int numbytes;
     struct addrinfo hints, *servinfo, *p;
     int rv;
@@ -177,7 +223,7 @@ int send_to_server(char* buf[], char* argv[]) {
 
     if ((rv = getaddrinfo(argv[2], argv[3], &hints, &servinfo)) != 0) {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
-        return 1;
+        return -1;
     }
     
     /* loop through all the results and connect to the first we can */
@@ -186,13 +232,11 @@ int send_to_server(char* buf[], char* argv[]) {
             perror("proxy: socket");
             continue;
         }
-
         if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
             close(sockfd);
             perror("proxy: connect");
             continue;
         }
-
         break;
     }
 
@@ -200,22 +244,19 @@ int send_to_server(char* buf[], char* argv[]) {
         fprintf(stderr, "proxy: failed to connect\n");
         return -1;
     }
-
-    inet_ntop(p->ai_family, get_in_addr((struct sockaddr *) p->ai_addr), s, sizeof s);
-
-    freeaddrinfo(servinfo); /* all done with this structure */
     
-    if (send(sockfd, *buf, MAXDATASIZE, 0) == -1)
-        perror("send");
-
-    if ((numbytes = recv(sockfd, *buf, MAXDATASIZE - 1, 0)) == -1) {
-        perror("recv");
-        return -1;
-    }
-    printf("recvd = %s\n", *buf);
-
-    close(sockfd);
-
-    return 0;
+    freeaddrinfo(servinfo); /* all done with this structure */
+   
+    return sockfd;
 }
 
+/*
+ * send_reply - send reply message back to connection
+ */
+int send_reply(int new_fd, char* reply[]) {
+    if (send(new_fd, *reply, strlen(*reply), 0) == -1){
+        perror("send");
+        return -1;
+    }
+    return 1;
+}
