@@ -213,9 +213,9 @@ enum operations parse_message(char* buf[], char* reply[], struct parsed_msg* cur
     char* save;
 
     /* parse message into three components*/
-    command = strtok_r(*buf, " \n", &save);
-    key = strtok_r(NULL, " \n", &save);
-    value = strtok_r(NULL, " \n", &save);
+    command = strtok_r(*buf, " \n\0", &save);
+    key = strtok_r(NULL, " \n\0", &save);
+    value = strtok_r(NULL, "\n\0", &save);
 
     /* map pointers to struct for operation function use */
     current_msg->key = key;
@@ -228,7 +228,6 @@ enum operations parse_message(char* buf[], char* reply[], struct parsed_msg* cur
     int param_count = 0;
 
     /* check that components are correct size */
-
     if (key != NULL) {
         if (strlen(key) > KEYSIZE) {
             return undefined_op;
@@ -241,7 +240,7 @@ enum operations parse_message(char* buf[], char* reply[], struct parsed_msg* cur
     }
     
     if (value != NULL) {
-        if (strlen(value) > KEYSIZE) {
+        if (strlen(value) > VALUESIZE) {
             return undefined_op;
         } else {
             if (value[strlen(value)] == '\n') {
@@ -292,7 +291,6 @@ void add_function(struct parsed_msg* new) {
     /* Add to list (non-recursive) */
     while (1) {
         /* check duplicate key*/
-
         if (strcmp(node->key, new->key) == 0) {
             sem_post(&GL_head_mutex);
             send_reply(new->fd, &dup1);
@@ -322,7 +320,6 @@ void getvalue_function(struct parsed_msg* new) {
     data_container* node;
     sem_wait(&GL_head_mutex);
     node = GL_head;
-
 
     /* list is empty, so no match */
     if (GL_head == NULL) {
@@ -373,8 +370,16 @@ void getall_function(struct parsed_msg* new) {
             sem_post(&GL_head_mutex);
             return;
         } else{
+            char* key = node->key;
             char* value = node->value;
-            send_reply(new->fd, &value);
+            char* buf = malloc(sizeof (char) * MAXDATASIZE);
+            strcat(buf, "(");
+            strcat(buf, key);
+            strcat(buf, ", ");
+            strcat(buf, value);
+            strcat(buf, ")\n");
+            usleep(1000);
+            send_reply(new->fd, &buf);
             node = node->next;
         }
     }

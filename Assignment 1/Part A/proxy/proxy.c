@@ -112,7 +112,7 @@ int main(int argc, char* argv[]) {
         inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *) &their_addr), s, sizeof s);
         printf("proxy: got connection from %s\n", s);
 
-        if (!fork()) { /* this is the child process */
+        if (!fork()) {
             char* buf = malloc(sizeof (char) * MAXDATASIZE);
             int numbytes;
             char error_msg[] = "Proxy-Server connection fault\n";
@@ -130,7 +130,7 @@ int main(int argc, char* argv[]) {
                         perror("recv");
                         exit(1);
                     }
-
+                    /* if (!fork()) {  */
                     /* connection got closed, cleanup */
                     if (numbytes == 0) {
                         perror("closed connection");
@@ -156,6 +156,7 @@ int main(int argc, char* argv[]) {
                         free(buf);
                         exit(0);
                     }
+                    /*}*/
                 }
             }
 
@@ -167,7 +168,7 @@ int main(int argc, char* argv[]) {
                     free(buf);
                     exit(1);
                 }
-                
+
                 /* connection got closed, cleanup */
                 if (numbytes == 0) {
                     perror("closed connection");
@@ -179,10 +180,10 @@ int main(int argc, char* argv[]) {
                 buf[numbytes] = '\0';
                 
                 /* Send message to server */
-                if (send_reply(server_fd, &buf)) {
+                if (send_reply(server_fd, &buf) == 1) {
                     printf("proxy: sent message to server, %s \n", buf);
                 } else {
-                    send_reply(client_fd, error_ptr);
+                    exit(0);
                 }
             }
         }
@@ -260,9 +261,12 @@ int connect_to_server(char* argv[]) {
  * send_reply - send reply message back to connection
  */
 int send_reply(int new_fd, char* reply[]) {
-    if (send(new_fd, *reply, strlen(*reply) + 1, 0) == -1){
+
+    int numbytes = send(new_fd, *reply, strlen(*reply) + 1, 0);
+    if (numbytes == -1 || numbytes == 0) {
         perror("send");
         return -1;
+    } else {
+        return 1;
     }
-    return 1;
 }
