@@ -20,7 +20,7 @@
 #include <signal.h>
 
 #define BACKLOG 10
-#define MAXDATASIZE 221 /* max number of char we can get at once [10] + [10] + [200] + '\0' */
+#define MAXDATASIZE 222 /* max number of char we can get at once [10] + [10] + [200] + '\n' + '\0' */
 
 
 void sigchld_handler(int s);
@@ -117,11 +117,49 @@ int main(int argc, char* argv[]) {
             int numbytes;
             char error_msg[] = "Proxy-Server connection fault\n";
             char* error_ptr = error_msg;
-            
+
             /* connect to server, get server fd*/
             int server_fd = connect_to_server(argv);
-            printf("proxy: got connection to server, fd = %li \n", s, server_fd);
-            /* child loop*/
+
+
+            if (!fork()) {
+                /* this fork handles server-> client communication */
+                while (1) {
+                    /* listen for reply from server*/
+                    if ((numbytes = recv(server_fd, buf, MAXDATASIZE - 1, 0)) == -1) {
+                        perror("recv");
+                        exit(1);
+                    }
+
+                    /* connection got closed, cleanup */
+                    if (numbytes == 0) {
+                        perror("closed connection");
+                        close(client_fd);
+                        close(server_fd);
+                        free(buf);
+                        exit(0);
+                    }
+
+                    /* hack to ensure a newline is at end of message */
+                    char* save;
+                    buf = strtok_r(buf, "\n\0", &save);
+                    strcat(buf, "\n");
+
+                    /* Send message to client */
+                    if (send_reply(client_fd, &buf)) {
+                        printf("proxy: sent message to client, %s \n", buf);
+                        /* connection got closed, cleanup */
+                    } else {
+                        perror("closed connection");
+                        close(client_fd);
+                        close(server_fd);
+                        free(buf);
+                        exit(0);
+                    }
+                }
+            }
+
+            /* this child-parent handles client -> server communication */
             while (1) {
                 /* wait for message from client */
                 if ((numbytes = recv(client_fd, buf, MAXDATASIZE - 1, 0)) == -1) {
@@ -140,43 +178,11 @@ int main(int argc, char* argv[]) {
                 }
                 buf[numbytes] = '\0';
                 
-                printf("proxy: got message from %s = %s \n", s, buf);
-                
                 /* Send message to server */
                 if (send_reply(server_fd, &buf)) {
-                    printf("proxy: sent message, %s \n", buf);
+                    printf("proxy: sent message to server, %s \n", buf);
                 } else {
                     send_reply(client_fd, error_ptr);
-                }
-
-                /* listen for reply from server*/
-                if ((numbytes = recv(server_fd, buf, MAXDATASIZE - 1, 0)) == -1) {
-                    perror("recv");
-                    return -1;
-                }
-
-                /* connection got closed, cleanup */
-                if (numbytes == 0) {
-                    perror("closed connection");
-                    close(client_fd);
-                    close(server_fd);
-                    free(buf);
-                    exit(0);
-                }
-
-                printf("recvd = %s\n", buf);
-
-                /* Send message to client */
-                if (send_reply(client_fd, &buf)) {
-                    printf("proxy: sending message to client, %s \n", buf);
-                    
-                /* connection got closed, cleanup */
-                } else {
-                    perror("closed connection");
-                    close(client_fd);
-                    close(server_fd);
-                    free(buf);
-                    exit(0);
                 }
             }
         }
@@ -254,7 +260,7 @@ int connect_to_server(char* argv[]) {
  * send_reply - send reply message back to connection
  */
 int send_reply(int new_fd, char* reply[]) {
-    if (send(new_fd, *reply, strlen(*reply), 0) == -1){
+    if (send(new_fd, *reply, strlen(*reply) + 1, 0) == -1){
         perror("send");
         return -1;
     }

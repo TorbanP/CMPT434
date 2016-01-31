@@ -22,13 +22,15 @@
 #include <pthread.h>
 
 #define BACKLOG 10
-#define MAXDATASIZE 221 /* max number of char we can get at once [10] + [10] + [200] + '\0' */
+#define MAXDATASIZE 222 /* max number of char we can get at once [10] + [10] + [200] + '\n' + '\0' */
 #define COMMANDSIZE 10
 #define KEYSIZE 10
 #define VALUESIZE 200 
 #define THREADLIMIT 100
 
+/* STRUCTS & ENUMS */
 typedef struct data_container data_container;
+typedef struct parsed_msg parsed_msg;
 
 enum operations {
     add_op,
@@ -39,9 +41,8 @@ enum operations {
 };
 
 struct data_container {
-    int active;
-    char* key;
-    char* value;
+    char key[KEYSIZE + 1];
+    char value[VALUESIZE + 1];
     data_container* next;
 };
 
@@ -65,20 +66,16 @@ void *worker_thread(void *arg1);
 
 /* GLOBAL */
 sem_t GL_head_mutex;
-data_container GL_head;
+data_container* GL_head;
 
 /*
  * main - listens via tcp, parses, and performs basic data storage operations
  */
 int main(int argc, char** argv) {
 
-    if (sem_init(&GL_head_mutex, 0, 1) == -1){
+    if (sem_init(&GL_head_mutex, 0, 1) == -1) {
         perror("sem init failed");
     }
-    GL_head.active = 0;
-    GL_head.key = NULL;
-    GL_head.value = NULL;
-    GL_head.next = NULL;
 
     if (argc != 2) {
         fprintf(stderr, "usage: [server listen port]\n");
@@ -86,7 +83,7 @@ int main(int argc, char** argv) {
     }
 
     int sockfd;
-
+    GL_head = NULL;
     struct addrinfo hints, *servinfo, *p;
     struct sockaddr_storage their_addr; /* connector's address information */
     socklen_t sin_size;
@@ -147,12 +144,12 @@ int main(int argc, char** argv) {
     }
 
     printf("server: waiting for connections...\n");
-    
+
     /* prepare pthreads */
     pthread_t threads[THREADLIMIT];
     int thread_fd[THREADLIMIT];
     int thread_counter = 0;
-    
+
     /* main accept loop, listen and spawn thread on incoming connections */
     while (1) {
         sin_size = sizeof their_addr;
@@ -209,119 +206,245 @@ void *get_in_addr(struct sockaddr *sa) {
  * parse_message
  */
 enum operations parse_message(char* buf[], char* reply[], struct parsed_msg* current_msg) {
-    
+
     char* command;
     char* key;
     char* value;
     char* save;
-    
+
     /* parse message into three components*/
-    command = strtok_r(*buf, " ", &save);
-    key = strtok_r(NULL, " ", &save);
-    value = strtok_r(NULL, "\0", &save);
-    
+    command = strtok_r(*buf, " \n", &save);
+    key = strtok_r(NULL, " \n", &save);
+    value = strtok_r(NULL, " \n", &save);
+
     /* map pointers to struct for operation function use */
     current_msg->key = key;
     current_msg->value = value;
-    
-    /* check if message has 3 non-null components */
-    if (command == NULL || key == NULL || value == NULL) {
-        return undefined_op;
-        
-    /* check that components are correct size */
-    } else if ((strlen(command) > COMMANDSIZE) || (strlen(key) > KEYSIZE) || (strlen(value) > VALUESIZE)) {
-        return undefined_op;
 
-    /* figure out if command is valid, and return which if so*/
-    } else {
-        if (!strcmp("add", command)) {
-            return add_op;
-        } else if (!strcmp("getvalue", command)) {
-            return getvalue_op;
-        } else if (!strcmp("getall", command)) {
-            return getall_op;
-        } else if (!strcmp("remove", command)) {
-            return remove_op;
-        } else {
+    /* check if message has a possibly valid command */
+    if (command == NULL && strlen(command) > COMMANDSIZE) {
+        return undefined_op;
+    }
+    int param_count = 0;
+
+    /* check that components are correct size */
+
+    if (key != NULL) {
+        if (strlen(key) > KEYSIZE) {
             return undefined_op;
+        } else {
+            if (key[strlen(key)] == '\n') {
+                key[strlen(key)] = '\0';
+            }
+            param_count++;
         }
+    }
+    
+    if (value != NULL) {
+        if (strlen(value) > KEYSIZE) {
+            return undefined_op;
+        } else {
+            if (value[strlen(value)] == '\n') {
+                value[strlen(value)] = '\0';
+            }
+            param_count++;
+        }
+    }
+
+    /* check if command is valid */
+    if (!strcmp("add", command) && param_count == 2) {
+        return add_op;
+    } else if (!strcmp("getvalue", command) && param_count == 1) {
+        return getvalue_op;
+    } else if (!strcmp("getall", command) && param_count == 0) {
+        return getall_op;
+    } else if (!strcmp("remove", command) && param_count == 1) {
+        return remove_op;
+    } else {
+        return undefined_op;
     }
 }
 
 /*
  * add_function - add (key, value) pair, if no existing pair with same key value
  */
-void add_function(struct parsed_msg* current_msg) {
-    sem_wait(&GL_head_mutex);
-    char enter_success[] = "Success: recorded message\n\0";
+void add_function(struct parsed_msg* new) {
+
+    char enter_success[] = "Success: recorded message\n";
     char* enter1 = enter_success;
     char duplicate[] = "Error: Duplicate key exists\n";
     char* dup1 = duplicate;
+    data_container* node;
+
     /* Case 1: GL_head is NULL*/
-    if (GL_head.active == 0) {
-        printf("head null\n");
-        GL_head.active = 1;
-        GL_head.key = current_msg->key;
-        GL_head.value = current_msg->value;
+    sem_wait(&GL_head_mutex);
+    if (GL_head == NULL) {
+        GL_head = malloc(sizeof (data_container));
+        strcpy(GL_head->key, new->key);
+        strcpy(GL_head->value, new->value);
+        GL_head->next = NULL;
         sem_post(&GL_head_mutex);
-        send_reply(current_msg->fd, &enter1);
+        send_reply(new->fd, &enter1);
         return;
     }
-    
-    sem_post(&GL_head_mutex);
-    send_reply(current_msg->fd, &dup1);
+    /*Case 2: non-empty list*/
+    node = GL_head;
+    /* Add to list (non-recursive) */
+    while (1) {
+        /* check duplicate key*/
 
+        if (strcmp(node->key, new->key) == 0) {
+            sem_post(&GL_head_mutex);
+            send_reply(new->fd, &dup1);
+            return;
+        } else if (node->next == NULL) {
+            node->next = malloc(sizeof (data_container));
+            node = node->next;
+            strcpy(node->key, new->key);
+            strcpy(node->value, new->value);
+            sem_post(&GL_head_mutex);
+            send_reply(new->fd, &enter1);
+            return;
+        } else {
+            node = node->next;
+        }
+    }
 }
 
 /*
  * getvalue_function - return value from matching (key, value) pair, if any
  */
-void getvalue_function(struct parsed_msg* current_msg) {
+void getvalue_function(struct parsed_msg* new) {
+
+    char err[] = "Error: key does not exist\n";
+    char* err_p = err;
+
+    data_container* node;
     sem_wait(&GL_head_mutex);
+    node = GL_head;
 
 
+    /* list is empty, so no match */
+    if (GL_head == NULL) {
+        sem_post(&GL_head_mutex);
+        send_reply(new->fd, &err_p);
+    }
+    /* iterate list for match */
+    while (1) {
+        if (NULL == node) {
+            sem_post(&GL_head_mutex);
+            send_reply(new->fd, &err_p);
+            return;
+        } else if (strcmp(node->key, new->key) == 0) {
+            char* value = node->value;
+            
+            send_reply(new->fd, &value);
 
-
-
-
-    sem_post(&GL_head_mutex);
+            sem_post(&GL_head_mutex);
+            return;
+        } else {
+            node = node->next;
+        }
+    }
 }
 
 /*
  * getall_function - return all (key, value) pairs
  */
-void getall_function(struct parsed_msg* current_msg) {
+void getall_function(struct parsed_msg* new) {
+
+    char err[] = "Error: no data exists\n";
+    char* err_p = err;
+    data_container* node;
+
     sem_wait(&GL_head_mutex);
-
-
-
-
-
-
-    sem_post(&GL_head_mutex);
+    node = GL_head;
+    
+    /* empty list */
+    if (NULL == node) {
+        sem_post(&GL_head_mutex);
+        send_reply(new->fd, &err_p);
+        return;
+    }
+    
+    /* iterate list, printing */
+    while (1) {
+        if (NULL == node) {
+            sem_post(&GL_head_mutex);
+            return;
+        } else{
+            char* value = node->value;
+            send_reply(new->fd, &value);
+            node = node->next;
+        }
+    }
 }
 
 /*
  * remove_function - remove matching (key, value) pair, if any
  */
-void remove_function(struct parsed_msg* current_msg) {
+void remove_function(struct parsed_msg* new) {
+
+    char err[] = "Error: key doesn't exist\n";
+    char* err_p = err;
+    char success[] = "Success: deleted entry\n";
+    char* success_p = success;
+
+    data_container* node;
+    data_container* prev_node;
+
     sem_wait(&GL_head_mutex);
+    node = GL_head;
+    prev_node = NULL;
 
+    while (1) {
+        /* empty list */
+        if (NULL == node) {
+            sem_post(&GL_head_mutex);
+            send_reply(new->fd, &err_p);
+            return;
+        } else if (strcmp(node->key, new->key) == 0) {
+            
+            /* only element */
+            if (prev_node == NULL) {
+                if (NULL == node->next) {
+                    GL_head = NULL;
+                    free(node);
+                    sem_post(&GL_head_mutex);
+                    send_reply(new->fd, &success_p);
+                    return;
 
-
-
-
-
-    sem_post(&GL_head_mutex);
+                    /* delete head, more data exists */
+                } else {
+                    GL_head = node->next;
+                    free(node);
+                    sem_post(&GL_head_mutex);
+                    send_reply(new->fd, &success_p);
+                    return;
+                }
+                /* not head */
+            } else {
+                prev_node->next = node->next;
+                free(node);
+                sem_post(&GL_head_mutex);
+                send_reply(new->fd, &success_p);
+                return;
+            }
+            /* miss */
+        } else {
+            prev_node = node;
+            node = node->next;
+        }
+    }
 }
 
 /*
  * send_reply - send reply message back to connection
  */
 void send_reply(int new_fd, char* reply[]) {
-    
-    printf("server sending reply, %s\n", *reply);
-    if (send(new_fd, *reply, strlen(*reply), 0) == -1)
+
+    printf("server: sending reply, %s\n", *reply);
+    if (send(new_fd, *reply, strlen(*reply) + 1, 0) == -1)
         perror("send");
 }
 
@@ -329,9 +452,9 @@ void send_reply(int new_fd, char* reply[]) {
  * worker_thread - 
  */
 void *worker_thread(void *arg1) {
-    
+
     /* fd to use with client */
-    int* new_fd = (int*)arg1;
+    int* new_fd = (int*) arg1;
     /* memory for all types of receives */
     char* buf = malloc(sizeof (char) * MAXDATASIZE);
     /* memory for all types of replies */
@@ -341,7 +464,7 @@ void *worker_thread(void *arg1) {
     char* err1 = error_msg;
     /* recv size */
     int numbytes;
-    
+
     /* worker loop */
     while (1) {
         /* listen for client message */
@@ -352,33 +475,37 @@ void *worker_thread(void *arg1) {
             close(*new_fd);
             pthread_exit(NULL);
         }
-        
-        printf("recv msg = %s\n", buf);
-        
+
+        printf("server: received message, %s\n", buf);
+
         /* connection got closed, cleanup */
         if (numbytes == 0) {
             free(buf);
             free(reply);
             close(*new_fd);
             pthread_exit(NULL);
-            
-        /* received a message */
+
+            /* received a message */
         } else {
 
             buf[numbytes - 1] = '\0';
             char* reply = malloc(sizeof (char) * MAXDATASIZE);
             struct parsed_msg current_message;
             current_message.fd = *new_fd;
-            
+
             /* validate and parse message*/
             enum operations ret = parse_message(&buf, &reply, &current_message);
-            
+
             /* perform operations requested by message */
             switch (ret) {
-                case add_op: add_function(&current_message); break;
-                case getvalue_op: getvalue_function(&current_message); break;
-                case getall_op: getall_function(&current_message); break;
-                case remove_op: remove_function(&current_message); break;
+                case add_op: add_function(&current_message);
+                    break;
+                case getvalue_op: getvalue_function(&current_message);
+                    break;
+                case getall_op: getall_function(&current_message);
+                    break;
+                case remove_op: remove_function(&current_message);
+                    break;
                 default: send_reply(*new_fd, &err1);
             }
         }
