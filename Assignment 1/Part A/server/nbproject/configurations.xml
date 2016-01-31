@@ -36,7 +36,7 @@
       </toolsSet>
       <compileType>
         <cTool>
-          <commandLine>-Wall -Werror</commandLine>
+          <commandLine>-Wall -Werror -pthread</commandLine>
         </cTool>
       </compileType>
       <item path="server.c" ex="false" tool="0" flavor2="0">
