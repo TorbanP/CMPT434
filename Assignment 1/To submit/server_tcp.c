@@ -1,7 +1,7 @@
 /* 
  * File:   server.c
  * Author: TJP873
- * CMPT 434 - Assignment 1, Part A, 3
+ * CMPT 434 - Assignment 1, Part A
  * Created on January 20, 2016, 6:22 PM
  * Some code based on http://beej.us/guide/bgnet/output/html/singlepage/bgnet.html
  */
@@ -56,13 +56,13 @@ struct parsed_msg {
 void sigchld_handler(int s);
 void *get_in_addr(struct sockaddr *sa);
 int start_tcp(char * argv[], struct sockaddr_storage *their_addr);
-enum operations parse_message(char buf[], char* reply[], struct parsed_msg* current_msg);
-void send_reply(int new_fd, char* reply[], struct sockaddr_storage client_addr);
-void add_function(struct parsed_msg* current_msg, struct sockaddr_storage client_addr);
-void getvalue_function(struct parsed_msg* current_msg, struct sockaddr_storage client_addr);
-void getall_function(struct parsed_msg* current_msg, struct sockaddr_storage client_addr);
-void remove_function(struct parsed_msg* current_msg, struct sockaddr_storage client_addr);
-in_port_t get_in_port(struct sockaddr *sa);
+enum operations parse_message(char* buf[], char* reply[], struct parsed_msg* current_msg);
+void send_reply(int new_fd, char* reply[]);
+void add_function(struct parsed_msg* current_msg);
+void getvalue_function(struct parsed_msg* current_msg);
+void getall_function(struct parsed_msg* current_msg);
+void remove_function(struct parsed_msg* current_msg);
+void *worker_thread(void *arg1);
 
 /* GLOBAL */
 sem_t GL_head_mutex;
@@ -77,31 +77,42 @@ int main(int argc, char** argv) {
         perror("sem init failed");
     }
 
-    int sockfd;
-    struct addrinfo hints, *servinfo, *p;
-    int rv;
-    int numbytes = 0;
-    struct sockaddr_storage server_addr, client_addr;
-    char* buf = malloc(sizeof (char) * MAXDATASIZE);
-    socklen_t addr_len;
+    if (argc != 2) {
+        fprintf(stderr, "usage: [server listen port]\n");
+        exit(1);
+    }
 
+    int sockfd;
+    GL_head = NULL;
+    struct addrinfo hints, *servinfo, *p;
+    struct sockaddr_storage their_addr; /* connector's address information */
+    socklen_t sin_size;
+    struct sigaction sa;
+    int yes = 1;
+    char s[INET6_ADDRSTRLEN];
+    int rv;
 
     memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_UNSPEC; // set to AF_INET to force IPv4
-    hints.ai_socktype = SOCK_DGRAM;
-    hints.ai_flags = AI_PASSIVE; // use my IP
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_PASSIVE; /* use my IP */
 
     if ((rv = getaddrinfo(NULL, argv[1], &hints, &servinfo)) != 0) {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
         return 1;
     }
 
-    // loop through all the results and bind to the first we can
+    /* loop through all the results and bind to the first we can */
     for (p = servinfo; p != NULL; p = p->ai_next) {
         if ((sockfd = socket(p->ai_family, p->ai_socktype,
                 p->ai_protocol)) == -1) {
             perror("server: socket");
             continue;
+        }
+
+        if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof (int)) == -1) {
+            perror("setsockopt");
+            exit(1);
         }
 
         if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
@@ -112,57 +123,60 @@ int main(int argc, char** argv) {
         break;
     }
 
+    freeaddrinfo(servinfo); /* all done with this structure */
+
     if (p == NULL) {
-        fprintf(stderr, "server: failed to bind socket\n");
-        return 2;
+        fprintf(stderr, "server: failed to bind\n");
+        exit(1);
     }
 
-    freeaddrinfo(servinfo);
+    if (listen(sockfd, BACKLOG) == -1) {
+        perror("listen");
+        exit(1);
+    }
 
-    /* error message stuff */
-    char error_msg[] = "Bad Query or oversized\n";
-    char* err1 = error_msg;
-    struct parsed_msg current_message;
-    current_message.fd = sockfd;
+    sa.sa_handler = sigchld_handler; /* reap all dead processes */
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    if (sigaction(SIGCHLD, &sa, NULL) == -1) {
+        perror("sigaction");
+        exit(1);
+    }
+
+    printf("server: waiting for connections...\n");
+
+    /* prepare pthreads */
+    pthread_t threads[THREADLIMIT];
+    int thread_fd[THREADLIMIT];
+    int thread_counter = 0;
+
+    /* main accept loop, listen and spawn thread on incoming connections */
     while (1) {
-        
-        addr_len = sizeof server_addr;
-        /* wait for incoming connection */
-        if ((numbytes = recvfrom(sockfd, buf, MAXDATASIZE - 1, 0, (struct sockaddr *) &client_addr, &addr_len)) == -1) {
-            perror("recvfrom");
-            continue;
+        sin_size = sizeof their_addr;
+        thread_fd[thread_counter] = accept(sockfd, (struct sockaddr *) &their_addr, &sin_size);
+        if (thread_fd[thread_counter] == -1) {
+            perror("accept");
+
         }
 
-        buf[numbytes] = '\0';
+        inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *) &their_addr), s, sizeof s);
+        printf("server: got connection from %s\n", s);
 
-        /* validate and parse message*/
-        enum operations ret = parse_message(buf, NULL, &current_message);
-
-        /* perform operations requested by message */
-        switch (ret) {
-            case add_op: add_function(&current_message, client_addr);
-                break;
-            case getvalue_op: getvalue_function(&current_message, client_addr);
-                break;
-            case getall_op: getall_function(&current_message, client_addr);
-                break;
-            case remove_op: remove_function(&current_message, client_addr);
-                break;
-            default: send_reply(sockfd, &err1, client_addr);
+        /* program will exit after threadlimit, could implement code to allow reuse of closed threads in threads but meh */
+        if (thread_counter == THREADLIMIT) {
+            printf("out of threads\n");
+            return (EXIT_SUCCESS);
         }
+        int* arg = &thread_fd[thread_counter];
+        int rc = pthread_create(&threads[thread_counter], NULL, worker_thread, (void *) arg);
+        if (rc) {
+            printf("ERROR; return code from pthread_create() is %d\n", rc);
+            exit(-1);
+        }
+        rc = pthread_detach(threads[thread_counter]);
+        thread_counter++;
     }
-    close(sockfd);
-    return 0;
-}
-
-/* get port, IPv4 or IPv6: */
-
-in_port_t get_in_port(struct sockaddr *sa) {
-    if (sa->sa_family == AF_INET) {
-        return (((struct sockaddr_in*) sa)->sin_port);
-    }
-
-    return (((struct sockaddr_in6*) sa)->sin6_port);
+    return (EXIT_SUCCESS);
 }
 
 /*
@@ -191,7 +205,7 @@ void *get_in_addr(struct sockaddr *sa) {
 /*
  * parse_message
  */
-enum operations parse_message(char buf[], char* reply[], struct parsed_msg* current_msg) {
+enum operations parse_message(char* buf[], char* reply[], struct parsed_msg* current_msg) {
 
     char* command;
     char* key;
@@ -199,7 +213,7 @@ enum operations parse_message(char buf[], char* reply[], struct parsed_msg* curr
     char* save;
 
     /* parse message into three components*/
-    command = strtok_r(buf, " \n\0", &save);
+    command = strtok_r(*buf, " \n\0", &save);
     key = strtok_r(NULL, " \n\0", &save);
     value = strtok_r(NULL, "\n\0", &save);
 
@@ -232,7 +246,7 @@ enum operations parse_message(char buf[], char* reply[], struct parsed_msg* curr
             param_count++;
         }
     }
-
+    
     if (value != NULL) {
         if (strlen(value) > VALUESIZE) {
             return undefined_op;
@@ -261,7 +275,7 @@ enum operations parse_message(char buf[], char* reply[], struct parsed_msg* curr
 /*
  * add_function - add (key, value) pair, if no existing pair with same key value
  */
-void add_function(struct parsed_msg* new, struct sockaddr_storage client_addr) {
+void add_function(struct parsed_msg* new) {
 
     char enter_success[] = "Success: recorded message\n";
     char* enter1 = enter_success;
@@ -277,7 +291,7 @@ void add_function(struct parsed_msg* new, struct sockaddr_storage client_addr) {
         strcpy(GL_head->value, new->value);
         GL_head->next = NULL;
         sem_post(&GL_head_mutex);
-        send_reply(new->fd, &enter1, client_addr);
+        send_reply(new->fd, &enter1);
         return;
     }
     /*Case 2: non-empty list*/
@@ -287,7 +301,7 @@ void add_function(struct parsed_msg* new, struct sockaddr_storage client_addr) {
         /* check duplicate key*/
         if (strcmp(node->key, new->key) == 0) {
             sem_post(&GL_head_mutex);
-            send_reply(new->fd, &dup1, client_addr);
+            send_reply(new->fd, &dup1);
             return;
         } else if (node->next == NULL) {
             node->next = malloc(sizeof (data_container));
@@ -295,7 +309,7 @@ void add_function(struct parsed_msg* new, struct sockaddr_storage client_addr) {
             strcpy(node->key, new->key);
             strcpy(node->value, new->value);
             sem_post(&GL_head_mutex);
-            send_reply(new->fd, &enter1, client_addr);
+            send_reply(new->fd, &enter1);
             return;
         } else {
             node = node->next;
@@ -306,7 +320,7 @@ void add_function(struct parsed_msg* new, struct sockaddr_storage client_addr) {
 /*
  * getvalue_function - return value from matching (key, value) pair, if any
  */
-void getvalue_function(struct parsed_msg* new, struct sockaddr_storage client_addr) {
+void getvalue_function(struct parsed_msg* new) {
 
     char err[] = "Error: key does not exist\n";
     char* err_p = err;
@@ -318,18 +332,18 @@ void getvalue_function(struct parsed_msg* new, struct sockaddr_storage client_ad
     /* list is empty, so no match */
     if (GL_head == NULL) {
         sem_post(&GL_head_mutex);
-        send_reply(new->fd, &err_p, client_addr);
+        send_reply(new->fd, &err_p);
     }
     /* iterate list for match */
     while (1) {
         if (NULL == node) {
             sem_post(&GL_head_mutex);
-            send_reply(new->fd, &err_p, client_addr);
+            send_reply(new->fd, &err_p);
             return;
         } else if (strcmp(node->key, new->key) == 0) {
             char* value = node->value;
-
-            send_reply(new->fd, &value, client_addr);
+            
+            send_reply(new->fd, &value);
 
             sem_post(&GL_head_mutex);
             return;
@@ -342,7 +356,7 @@ void getvalue_function(struct parsed_msg* new, struct sockaddr_storage client_ad
 /*
  * getall_function - return all (key, value) pairs
  */
-void getall_function(struct parsed_msg* new, struct sockaddr_storage client_addr) {
+void getall_function(struct parsed_msg* new) {
 
     char err[] = "Error: no data exists\n";
     char* err_p = err;
@@ -350,20 +364,20 @@ void getall_function(struct parsed_msg* new, struct sockaddr_storage client_addr
 
     sem_wait(&GL_head_mutex);
     node = GL_head;
-
+    
     /* empty list */
     if (NULL == node) {
         sem_post(&GL_head_mutex);
-        send_reply(new->fd, &err_p, client_addr);
+        send_reply(new->fd, &err_p);
         return;
     }
-
+    
     /* iterate list, printing */
     while (1) {
         if (NULL == node) {
             sem_post(&GL_head_mutex);
             return;
-        } else {
+        } else{
             char* key = node->key;
             char* value = node->value;
             char* buf = malloc(sizeof (char) * MAXDATASIZE);
@@ -373,7 +387,7 @@ void getall_function(struct parsed_msg* new, struct sockaddr_storage client_addr
             strcat(buf, value);
             strcat(buf, ")\n");
             usleep(1000);
-            send_reply(new->fd, &buf, client_addr);
+            send_reply(new->fd, &buf);
             node = node->next;
         }
     }
@@ -382,7 +396,7 @@ void getall_function(struct parsed_msg* new, struct sockaddr_storage client_addr
 /*
  * remove_function - remove matching (key, value) pair, if any
  */
-void remove_function(struct parsed_msg* new, struct sockaddr_storage client_addr) {
+void remove_function(struct parsed_msg* new) {
 
     char err[] = "Error: key doesn't exist\n";
     char* err_p = err;
@@ -400,17 +414,17 @@ void remove_function(struct parsed_msg* new, struct sockaddr_storage client_addr
         /* empty list */
         if (NULL == node) {
             sem_post(&GL_head_mutex);
-            send_reply(new->fd, &err_p, client_addr);
+            send_reply(new->fd, &err_p);
             return;
         } else if (strcmp(node->key, new->key) == 0) {
-
+            
             /* only element */
             if (prev_node == NULL) {
                 if (NULL == node->next) {
                     GL_head = NULL;
                     free(node);
                     sem_post(&GL_head_mutex);
-                    send_reply(new->fd, &success_p, client_addr);
+                    send_reply(new->fd, &success_p);
                     return;
 
                     /* delete head, more data exists */
@@ -418,7 +432,7 @@ void remove_function(struct parsed_msg* new, struct sockaddr_storage client_addr
                     GL_head = node->next;
                     free(node);
                     sem_post(&GL_head_mutex);
-                    send_reply(new->fd, &success_p, client_addr);
+                    send_reply(new->fd, &success_p);
                     return;
                 }
                 /* not head */
@@ -426,7 +440,7 @@ void remove_function(struct parsed_msg* new, struct sockaddr_storage client_addr
                 prev_node->next = node->next;
                 free(node);
                 sem_post(&GL_head_mutex);
-                send_reply(new->fd, &success_p, client_addr);
+                send_reply(new->fd, &success_p);
                 return;
             }
             /* miss */
@@ -440,8 +454,73 @@ void remove_function(struct parsed_msg* new, struct sockaddr_storage client_addr
 /*
  * send_reply - send reply message back to connection
  */
-void send_reply(int new_fd, char* reply[], struct sockaddr_storage client_addr) {
+void send_reply(int new_fd, char* reply[]) {
 
-    if (sendto(new_fd, *reply, strlen(*reply), 0, (struct sockaddr *) &client_addr, sizeof (struct sockaddr)) == -1)
+    printf("server: sending reply, %s\n", *reply);
+    if (send(new_fd, *reply, strlen(*reply) + 1, 0) == -1)
         perror("send");
+}
+
+/*
+ * worker_thread - 
+ */
+void *worker_thread(void *arg1) {
+
+    /* fd to use with client */
+    int* new_fd = (int*) arg1;
+    /* memory for all types of receives */
+    char* buf = malloc(sizeof (char) * MAXDATASIZE);
+    /* memory for all types of replies */
+    char* reply = malloc(sizeof (char) * MAXDATASIZE);
+    /* error message stuff */
+    char error_msg[] = "Bad Query or oversized\n";
+    char* err1 = error_msg;
+    /* recv size */
+    int numbytes;
+
+    /* worker loop */
+    while (1) {
+        /* listen for client message */
+        if ((numbytes = recv(*new_fd, buf, MAXDATASIZE, 0)) == -1) {
+            perror("recv");
+            free(buf);
+            free(reply);
+            close(*new_fd);
+            pthread_exit(NULL);
+        }
+
+        printf("server: received message, %s\n", buf);
+
+        /* connection got closed, cleanup */
+        if (numbytes == 0) {
+            free(buf);
+            free(reply);
+            close(*new_fd);
+            pthread_exit(NULL);
+
+            /* received a message */
+        } else {
+
+            buf[numbytes - 1] = '\0';
+            char* reply = malloc(sizeof (char) * MAXDATASIZE);
+            struct parsed_msg current_message;
+            current_message.fd = *new_fd;
+
+            /* validate and parse message*/
+            enum operations ret = parse_message(&buf, &reply, &current_message);
+
+            /* perform operations requested by message */
+            switch (ret) {
+                case add_op: add_function(&current_message);
+                    break;
+                case getvalue_op: getvalue_function(&current_message);
+                    break;
+                case getall_op: getall_function(&current_message);
+                    break;
+                case remove_op: remove_function(&current_message);
+                    break;
+                default: send_reply(*new_fd, &err1);
+            }
+        }
+    }
 }

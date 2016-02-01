@@ -1,0 +1,35 @@
+
+# Student/Author   : Torban Peterson
+# NSID             : tjp873
+# Student No.      : 10924970
+# Course           : CMPT 434
+
+# Description      : Assignment 1
+
+#CC variable used to make GCC
+CC=gcc
+
+#UNAME appears again to flag the operation as windows or UNIX
+
+CFLAGS=-Wall -Werror
+
+
+LIB=-pthread
+
+.PHONY: all clean distclean
+
+
+all: tcp udp
+
+tcp: 
+	$(CC)  $(CFLAGS) $(LIB) proxy_tcp.c -o proxy_tcp
+	$(CC)  $(CFLAGS) $(LIB) server_tcp.c -o server_tcp
+
+udp: 
+	$(CC)  $(CFLAGS) $(LIB) proxy_udp.c -o proxy_udp
+	$(CC)  $(CFLAGS) $(LIB) server_udp.c -o server_udp
+
+clean:
+	rm -rf *.o *.dSYM proxy_tcp server_tcp proxy_udp server_udp
+
+distclean: clean

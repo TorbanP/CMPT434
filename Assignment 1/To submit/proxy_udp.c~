@@ -42,7 +42,6 @@ int main(int argc, char* argv[]) {
     int sockfd;
     int client_fd, server_fd; /* listen on sock_fd, new connection on new_fd */
     struct addrinfo hints, *servinfo, *p, *p_server;
-    p_server = NULL;
     struct sockaddr_storage their_addr, server_addr; /* connector's address information */
     socklen_t addr_len, sin_size;
     struct sigaction sa;
@@ -124,8 +123,6 @@ int main(int argc, char* argv[]) {
         if (!fork()) {
             char* buf = malloc(sizeof (char) * MAXDATASIZE);
             int numbytes;
-            char error_msg[] = "Proxy-Server connection fault\n";
-            char* error_ptr = error_msg;
 
             if (!fork()) {
                 /* this fork handles server-> client communication */
@@ -227,10 +224,8 @@ void *get_in_addr(struct sockaddr *sa) {
 int connect_to_server(char* argv[]) {
 
     int sockfd;
-    int numbytes;
     struct addrinfo hints, *servinfo, *p;
     int rv;
-    char s[INET6_ADDRSTRLEN];
 
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC;
