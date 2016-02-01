@@ -27,6 +27,7 @@ void sigchld_handler(int s);
 void *get_in_addr(struct sockaddr *sa);
 int connect_to_server(char* argv[]);
 int send_reply(int new_fd, char* reply[]);
+int udp_server_connect(char* argv[], struct addrinfo* p);
 
 /*
  * 
@@ -39,10 +40,10 @@ int main(int argc, char* argv[]) {
     }
 
     int sockfd;
-    int client_fd; /* listen on sock_fd, new connection on new_fd */
-    struct addrinfo hints, *servinfo, *p;
-    struct sockaddr_storage their_addr; /* connector's address information */
-    socklen_t sin_size;
+    int client_fd, server_fd; /* listen on sock_fd, new connection on new_fd */
+    struct addrinfo hints, *servinfo, *p, *p_server;
+    struct sockaddr_storage their_addr, server_addr; /* connector's address information */
+    socklen_t addr_len, sin_size;
     struct sigaction sa;
     int yes = 1;
     char s[INET6_ADDRSTRLEN];
@@ -98,7 +99,14 @@ int main(int argc, char* argv[]) {
         perror("sigaction");
         exit(1);
     }
+    
+    /* connect to server */
 
+    if((server_fd = udp_server_connect(argv, p_server)) == -1){
+        perror("proxy: failed to connect to server");
+        exit(1);
+    }
+    
     printf("proxy: waiting for connections...\n");
 
     while (1) { /* main accept() loop */
@@ -118,19 +126,16 @@ int main(int argc, char* argv[]) {
             char error_msg[] = "Proxy-Server connection fault\n";
             char* error_ptr = error_msg;
 
-            /* connect to server, get server fd*/
-            int server_fd = connect_to_server(argv);
-
-
             if (!fork()) {
                 /* this fork handles server-> client communication */
                 while (1) {
                     /* listen for reply from server*/
-                    if ((numbytes = recv(server_fd, buf, MAXDATASIZE - 1, 0)) == -1) {
+                    addr_len = sizeof server_addr;
+                    if ((numbytes = recvfrom(server_fd, buf, MAXDATASIZE - 1, 0, (struct sockaddr *) &server_addr, &addr_len)) == -1) {
                         perror("recv");
                         exit(1);
                     }
-                    /* if (!fork()) {  */
+
                     /* connection got closed, cleanup */
                     if (numbytes == 0) {
                         perror("closed connection");
@@ -156,7 +161,6 @@ int main(int argc, char* argv[]) {
                         free(buf);
                         exit(0);
                     }
-                    /*}*/
                 }
             }
 
@@ -178,13 +182,14 @@ int main(int argc, char* argv[]) {
                     exit(0);
                 }
                 buf[numbytes] = '\0';
-                
+
                 /* Send message to server */
-                if (send_reply(server_fd, &buf) == 1) {
-                    printf("proxy: sent message to server, %s \n", buf);
-                } else {
-                    exit(0);
+                int numbytes;
+                if ((numbytes = sendto(server_fd, buf, strlen(buf), 0, p->ai_addr, p->ai_addrlen)) == -1) {
+                    perror("talker: sendto");
+                    exit(1);
                 }
+
             }
         }
     }
@@ -269,4 +274,41 @@ int send_reply(int new_fd, char* reply[]) {
     } else {
         return 1;
     }
+}
+
+/*
+ * udp_server_connect - prepare udp connection to server
+ */
+int udp_server_connect(char* argv[], struct addrinfo* p){
+
+    int sockfd;
+    struct addrinfo hints, *servinfo;
+    int rv;
+
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_DGRAM;
+
+    if ((rv = getaddrinfo(argv[2], argv[3], &hints, &servinfo)) != 0) {
+        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+        return -1;
+    }
+
+    /* loop through all the results and make a socket */
+    for (p = servinfo; p != NULL; p = p->ai_next) {
+        if ((sockfd = socket(p->ai_family, p->ai_socktype,
+                p->ai_protocol)) == -1) {
+            perror("proxy: socket");
+            continue;
+        }
+        break;
+    }
+
+    if (p == NULL) {
+        fprintf(stderr, "proxy: failed to create socket\n");
+        return -1;
+    }
+
+    freeaddrinfo(servinfo);
+    return sockfd;
 }

@@ -125,7 +125,6 @@ int main(int argc, char** argv) {
     struct parsed_msg current_message;
     current_message.fd = sockfd;
     while (1) {
-        printf("server: waiting to recvfrom...\n");
 
         addr_len = sizeof server_addr;
         if ((numbytes = recvfrom(sockfd, buf, MAXDATASIZE - 1, 0, (struct sockaddr *) &client_addr, &addr_len)) == -1) {
