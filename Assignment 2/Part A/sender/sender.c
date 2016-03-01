@@ -17,8 +17,27 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 
-#define SERVERPORT "4950"    // the port users will be connecting to
+#define FRAMESIZE 10
+#define DATASIZE 256
+#define MAXFRAME 10
+#define INITSEQID 0
 
+typedef struct {
+    
+    char data[DATASIZE];
+    int seq_id;
+    
+} frame;
+
+/* 
+ * main
+ * Args: 
+ * IP address of the receiver, 
+ * the port number that the receiver will be using to receive data, 
+ * the maximum sending window size
+ * timeout value (in seconds)
+ * the number of lines to send
+ */
 int main(int argc, char *argv[])
 {
     int sockfd;
@@ -26,16 +45,37 @@ int main(int argc, char *argv[])
     int rv;
     int numbytes;
 
-    if (argc != 3) {
-        fprintf(stderr,"usage: talker hostname message\n");
+
+    if (argc != 6) {
+        fprintf(stderr, "usage: IP PORT WINDOWSIZE TIMEOUT\n");
         exit(1);
     }
+
+
+    frame frame_array[strtol(argv[5], NULL, 10)];
+
+    char *arrptr;
+    int ret;
+    size_t buffsize = DATASIZE;
+    char temp[DATASIZE];
+
+    FILE *stream;
+    stream = fopen("data", "r");
+    if (stream == NULL)
+        exit(EXIT_FAILURE);
+    int i = 0;
+    while(fgets(frame_array[i].data, buffsize, stream)){
+        frame_array[i].seq_id = i;
+        printf("%s",frame_array[i].data);
+        i++;
+    }
+     
 
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_DGRAM;
 
-    if ((rv = getaddrinfo(argv[1], SERVERPORT, &hints, &servinfo)) != 0) {
+    if ((rv = getaddrinfo(argv[1], argv[2], &hints, &servinfo)) != 0) {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
         return 1;
     }
