@@ -19,7 +19,6 @@
 #include <netdb.h>
 #include <sys/time.h>
 #include <sys/mman.h>
-#include <poll.h>
 
 
 #define DATASIZE 257
@@ -48,7 +47,7 @@ int main(int argc, char *argv[])
 {
     int *LAR = mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     int timeout = atoi(argv[4]);
-    struct pollfd clientPoll;
+    struct timeval start, stop;
     
     
     *LAR = INITSEQID;
@@ -142,17 +141,14 @@ int main(int argc, char *argv[])
         char buf[DATASIZE];
         addr_len = sizeof their_addr;
         
-        
-        
-        
         while (1) {
             if ((numbytes = recvfrom(sockfd, buf, DATASIZE - 1, 0, (struct sockaddr *) &their_addr, &addr_len)) == -1) {
                 perror("recvfrom");
                 exit(1);
             }
             printf("Sender: ACK =  %s", buf);
-            if (strtol(buf, NULL, 10) == *LAR + 2) {
-                *LAR++;
+            if (strtol(buf, NULL, 10) == *LAR) {
+                *LAR = *LAR + 1;
                 printf(" = ok, LAR = %d\n", *LAR);
             }
 
@@ -164,26 +160,29 @@ int main(int argc, char *argv[])
 
             /* check if i can send data to receiver */
             int LARtemp = *LAR;
-            while (GL_LFS - LARtemp < strtol(argv[3], NULL, 10)) {
-
+            int j = 0;
+            while (GL_LFS - LARtemp + 1 < strtol(argv[3], NULL, 10)) {
                 
+                if (j == 0){
+                    gettimeofday(&start, NULL);
+                }
 
-                if ((numbytes = sendto(sockfd, frame_array[GL_LFS - LARtemp].data, DATASIZE, 0, p->ai_addr, p->ai_addrlen)) == -1) {
+                if ((numbytes = sendto(sockfd, frame_array[LARtemp + j].data, DATASIZE, 0, p->ai_addr, p->ai_addrlen)) == -1) {
                     perror("talker: sendto");
                     exit(1);
                 }
-                GL_LFS++;
-                printf("sender: sent %d bytes to %s\n", numbytes, argv[1]);
-
+                GL_LFS = LARtemp + j;
+                j++;
+                printf("sender: sent %d bytes to %s = %s\n", numbytes, argv[1], frame_array[GL_LFS].data);
 
             }
             
-            
-            
-            
-            
-
             /* check if oldest sent has timed out */
+            gettimeofday(&stop, NULL);
+            if ((stop.tv_sec - start.tv_sec) > timeout){
+                GL_LFS = *LAR;
+            } 
+
         }
         close(sockfd);
 

@@ -21,14 +21,30 @@
 #define INITSEQID 0
 
 /* get sockaddr, IPv4 or IPv6: */
-void *get_in_addr(struct sockaddr *sa)
-{
+void *get_in_addr(struct sockaddr *sa) {
     if (sa->sa_family == AF_INET) {
-        return &(((struct sockaddr_in*)sa)->sin_addr);
+        return &(((struct sockaddr_in*) sa)->sin_addr);
     }
 
-    return &(((struct sockaddr_in6*)sa)->sin6_addr);
+    return &(((struct sockaddr_in6*) sa)->sin6_addr);
 }
+
+int dropper() {
+    fprintf(stdout, "send ACK y/n?\n");
+
+    int nbytes = 100;
+    char *my_string;
+    /* These 2 lines are the heart of the program. */
+    my_string = (char *) malloc(nbytes + 1);
+    getline(&my_string, &nbytes, stdin);
+
+    if (my_string[0] == 'Y' || my_string[0] == 'y') {
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
 
 int main(int argc, char *argv[])
 {
@@ -40,7 +56,7 @@ int main(int argc, char *argv[])
     struct sockaddr_storage their_addr;
     char buf[DATASIZE];
     socklen_t addr_len;
-    char s[INET6_ADDRSTRLEN];
+
 
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC; // set to AF_INET to force IPv4
@@ -83,32 +99,32 @@ int main(int argc, char *argv[])
             perror("recvfrom");
             exit(1);
         }
-
-        printf("Receiver: got packet from %s, ", inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *) &their_addr), s, sizeof s));
-        printf("packet is %d bytes long, message:\n", numbytes);
         buf[numbytes] = '\0';
 
         /* get seq id out*/
         int seq_id = 0;
         sscanf(buf, "%d", &seq_id);
-        printf("%s", buf);
 
         /* is seq id correct? */
 
         if (seq_id == expected_id) {
-            expected_id++;
-            printf("receiver: good id, sending ACK\n");
-            /* convert seq_id back to str */
-            char ACK[DATASIZE];
-            snprintf(ACK, 10, "%d", seq_id);
-            
-            
-            int numbytes;
-            if ((numbytes = sendto(sockfd, ACK , sizeof(ACK), 0, (struct sockaddr *) &their_addr, sizeof(their_addr))) == -1) {
-                perror("receiver: sendto");
-                exit(1);
-            }
 
+            printf("%s", buf);
+            printf("receiver: good id, ok to send ACK?\n");
+
+            if (dropper()) {
+            expected_id++;
+                /* convert seq_id back to str */
+                char ACK[DATASIZE];
+                snprintf(ACK, 10, "%d", seq_id);
+
+
+                int numbytes;
+                if ((numbytes = sendto(sockfd, ACK, sizeof (ACK), 0, (struct sockaddr *) &their_addr, sizeof (their_addr))) == -1) {
+                    perror("receiver: sendto");
+                    exit(1);
+                }
+            }
         }
 
 
