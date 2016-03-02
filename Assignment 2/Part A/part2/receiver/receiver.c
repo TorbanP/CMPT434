@@ -55,7 +55,7 @@ int dropper(int placeholder) {
  */
 int dropper2(int probability){
     sleep(1);
-    srand(time(NULL));
+    //srand(time(NULL));
     if(rand()%101 < probability){
         return 1;
     } else {
@@ -69,6 +69,7 @@ int dropper2(int probability){
 
 int main(int argc, char *argv[])
 {
+    srand(time(NULL));
     int expected_id = INITSEQID;
     int sockfd;
     struct addrinfo hints, *servinfo, *p;
@@ -78,8 +79,8 @@ int main(int argc, char *argv[])
     char buf[DATASIZE];
     socklen_t addr_len;
 
-    if (argc != 3) {
-        fprintf(stderr, "usage: PORT PROBABILITY\n");
+    if (argc != 4) {
+        fprintf(stderr, "usage: PORT PROBABILITY RMAX\n");
         exit(1);
     }
     

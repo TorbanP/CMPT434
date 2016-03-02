@@ -36,7 +36,7 @@
       </toolsSet>
       <compileType>
         <cTool>
-          <commandLine>-Wall -pthread</commandLine>
+          <commandLine>-Wall -pthread -w -pedantic</commandLine>
         </cTool>
       </compileType>
       <item path="receiver.c" ex="false" tool="0" flavor2="0">

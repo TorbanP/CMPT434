@@ -36,7 +36,7 @@
       </toolsSet>
       <compileType>
         <cTool>
-          <commandLine>-Wall -pedantic</commandLine>
+          <commandLine>-Wall -pedantic -w</commandLine>
         </cTool>
       </compileType>
       <item path="sender.c" ex="false" tool="0" flavor2="0">

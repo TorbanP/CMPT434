@@ -13,8 +13,6 @@
         <gdb_interceptlist>
           <gdbinterceptoptions gdb_all="false" gdb_unhandled="true" gdb_unexpected="true"/>
         </gdb_interceptlist>
-        <gdb_signals>
-        </gdb_signals>
         <gdb_options>
           <DebugOptions>
             <option name="gdb_follow_fork_mode" value="child"/>
@@ -34,8 +32,9 @@
           <runcommandpicklistitem>"${OUTPUT_PATH}" 30200 100</runcommandpicklistitem>
           <runcommandpicklistitem>"${OUTPUT_PATH}" 30200 1</runcommandpicklistitem>
           <runcommandpicklistitem>"${OUTPUT_PATH}" 30200 50</runcommandpicklistitem>
+          <runcommandpicklistitem>"${OUTPUT_PATH}" 30200 50 5</runcommandpicklistitem>
         </runcommandpicklist>
-        <runcommand>"${OUTPUT_PATH}" 30200 50</runcommand>
+        <runcommand>"${OUTPUT_PATH}" 30200 50 5</runcommand>
         <rundir></rundir>
         <buildfirst>true</buildfirst>
         <terminal-type>0</terminal-type>

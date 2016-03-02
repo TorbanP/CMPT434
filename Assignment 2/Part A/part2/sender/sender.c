@@ -25,10 +25,19 @@
 #define SEQSIZE 6
 #define INITSEQID 0
 
-/* contains a list of messages to send. originally had more items inside hence the struct */
+
+enum state_id{
+    READY,
+    ACTIVE,
+    COMPLETE
+};
+
+
+/* the message package & state details */
 typedef struct {
     char data[SEQSIZE + DATASIZE];
-
+    
+    struct timeval sent;
 } frame;
 
 /* 
@@ -76,6 +85,9 @@ int main(int argc, char *argv[]) {
     fclose(linecount);
 
     frame frame_array[lines];
+    int *shared_state = mmap(NULL, (sizeof(int) * lines), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    
+    
 
     /* get messages from file to save time , hardcoded but meh, store in frame_array*/
 
@@ -86,12 +98,13 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     int i = 0;
     int seq_id = INITSEQID;
-    char* temp_msg[DATASIZE];
+    char temp_msg[DATASIZE];
     while (fgets(temp_msg, buffsize, stream)) {
         seq_id = i + INITSEQID;
         snprintf(frame_array[i].data, 10, "%d", seq_id);
         strcat(frame_array[i].data, " ");
         strcat(frame_array[i].data, temp_msg);
+        shared_state[i] = READY;
         printf("%s", frame_array[i].data);
         i++;
     }
@@ -136,43 +149,73 @@ int main(int argc, char *argv[]) {
                 exit(1);
             }
             printf("Sender: ACK =  %s", buf);
-            if (strtol(buf, NULL, 10) == *LAR) {
-                *LAR = *LAR + 1;
-                printf(" = ok, LAR = %d\n", *LAR);
-            }
+            
+            shared_state[strtol(buf, NULL, 10)] = COMPLETE;
         }
     } else {
         /* parent - sends frames */
+        
         while (1) {
+            
+            /* while there are frames NOT COMPLETE, we are NOT done*/
+            int j;
+            int complete_count;
+            for (j=0;j < lines; j++){
+                if(shared_state[j] == COMPLETE){
+                    complete_count++;
+                }
+            }
+            if (complete_count == lines) {
+                return 0;
+            }
 
-            /* check if i can send data to receiver */
-            int LARtemp = *LAR;
-            int j = 0;
-            while (GL_LFS - LARtemp + 1 < strtol(argv[3], NULL, 10)) {
-                /* check that there are still messages to run*/
-                if (j + LARtemp >= lines) {
-                    break;
-                } else if (LARtemp > lines) {
-                    return 0;
+            /* see if the window is full, if not, send oldest message */
+            j = 0;
+            int active_frames = 0;
+            while (active_frames < strtol(argv[3], NULL, 10)) {
+                if (shared_state[j] == 0) {
+                    /* send message */
+                    if ((numbytes = sendto(sockfd, frame_array[j].data, DATASIZE, 0, p->ai_addr, p->ai_addrlen)) == -1) {
+                        perror("talker: sendto");
+                        exit(1);
+                    }
+                    /*set time of sent*/
+                    gettimeofday(&(frame_array[j].sent), NULL);
+                    shared_state[j] == 1;
+                    active_frames++;
+                    printf("sender: sent %d bytes to %s = %s", numbytes, argv[1], frame_array[j].data);
+                } else if (shared_state[j] == ACTIVE){
+                    active_frames++;
+                } else {
+                    if (j >= lines){
+                        break;
+                    }
                 }
-                /* oldest packet for timeout check */
-                if (j == 0) {
-                    gettimeofday(&start, NULL);
-                }
-
-                if ((numbytes = sendto(sockfd, frame_array[LARtemp + j].data, DATASIZE, 0, p->ai_addr, p->ai_addrlen)) == -1) {
-                    perror("talker: sendto");
-                    exit(1);
-                }
-                GL_LFS = LARtemp + j;
                 j++;
-                printf("sender: sent %d bytes to %s = %s", numbytes, argv[1], frame_array[GL_LFS].data);
             }
-            /* check if oldest sent has timed out, reset LFS if so to trigger retry*/
-            gettimeofday(&stop, NULL);
-            if ((stop.tv_sec - start.tv_sec) > timeout) {
-                GL_LFS = *LAR;
+
+            shared_state[4] = READY;
+            printf("sender: state = %d\n", shared_state[4]);
+            shared_state[4] = ACTIVE;
+            printf("sender: state = %d\n", shared_state[4]);
+            shared_state[4] = COMPLETE;
+            printf("sender: state = %d\n", shared_state[4]);
+
+
+            /* check for any timed out packets*/
+            j = 0;
+            for (j = 0; j < lines; j++) {
+                printf("sender: timeout state = %d\n", shared_state[j]);
+                if (shared_state[j] == ACTIVE) {
+                    gettimeofday(&stop, NULL);
+                    if ((stop.tv_sec - frame_array[j].sent.tv_sec) > timeout) {
+                        shared_state[j] == READY;
+                    }
+                }
             }
+
+
+
         }
         close(sockfd);
 
