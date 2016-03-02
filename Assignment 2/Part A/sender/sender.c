@@ -11,23 +11,29 @@
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
+#include <stdint.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <sys/time.h>
+#include <sys/mman.h>
+#include <poll.h>
 
-#define FRAMESIZE 10
-#define DATASIZE 256
-#define MAXFRAME 10
+
+#define DATASIZE 257
+#define SEQSIZE 6
 #define INITSEQID 0
 
 typedef struct {
-    
-    char data[DATASIZE];
-    int seq_id;
+    char data[SEQSIZE + DATASIZE];
     
 } frame;
+
+//int GL_LAR; /* Last ACK received */
+int GL_LFS; /* Last Frame Sent */
+
 
 /* 
  * main
@@ -40,36 +46,68 @@ typedef struct {
  */
 int main(int argc, char *argv[])
 {
+    int *LAR = mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    int timeout = atoi(argv[4]);
+    struct pollfd clientPoll;
+    
+    
+    *LAR = INITSEQID;
+    GL_LFS = INITSEQID;
     int sockfd;
+    struct sockaddr_storage their_addr;
+    socklen_t addr_len;
     struct addrinfo hints, *servinfo, *p;
     int rv;
     int numbytes;
 
-
-    if (argc != 6) {
+    if (argc != 5) {
         fprintf(stderr, "usage: IP PORT WINDOWSIZE TIMEOUT\n");
         exit(1);
     }
 
+    /* the frame data storage */
+    
+    /* find num lines in the file */
+    FILE *linecount;
+    int temp = 0;
+    int lines = 1;
+    linecount = fopen("data", "r");
+    if (linecount == NULL)
+        exit(EXIT_FAILURE);
+    
+    while ((temp = fgetc(linecount)) != EOF)
+    {
+      if (temp == '\n')
+    lines++;
+    }
+    fclose(linecount);
 
-    frame frame_array[strtol(argv[5], NULL, 10)];
+    frame frame_array[lines];
+    
+    /* get messages from file to save time , hardcoded but meh, store in frame_array*/
 
-    char *arrptr;
-    int ret;
     size_t buffsize = DATASIZE;
-    char temp[DATASIZE];
-
+    
     FILE *stream;
     stream = fopen("data", "r");
     if (stream == NULL)
         exit(EXIT_FAILURE);
     int i = 0;
-    while(fgets(frame_array[i].data, buffsize, stream)){
-        frame_array[i].seq_id = i;
+    int seq_id = INITSEQID;
+    char* temp_msg[DATASIZE];
+    while(fgets(temp_msg, buffsize, stream)){
+        seq_id = i + INITSEQID;
+        snprintf(frame_array[i].data, 10, "%d", seq_id);
+        strcat(frame_array[i].data, " ");
+        strcat(frame_array[i].data, temp_msg);
+        
+       // frame_array[i].seq_id = i + INITSEQID;
         printf("%s",frame_array[i].data);
         i++;
     }
+     fclose(stream);
      
+    /* UDP stuff */
 
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC;
@@ -80,10 +118,9 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    // loop through all the results and make a socket
+    /* loop through all the results and make a socket */
     for(p = servinfo; p != NULL; p = p->ai_next) {
-        if ((sockfd = socket(p->ai_family, p->ai_socktype,
-                p->ai_protocol)) == -1) {
+        if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
             perror("talker: socket");
             continue;
         }
@@ -96,16 +133,60 @@ int main(int argc, char *argv[])
         return 2;
     }
 
-    if ((numbytes = sendto(sockfd, argv[2], strlen(argv[2]), 0,
-             p->ai_addr, p->ai_addrlen)) == -1) {
-        perror("talker: sendto");
-        exit(1);
-    }
-
     freeaddrinfo(servinfo);
 
-    printf("talker: sent %d bytes to %s\n", numbytes, argv[1]);
-    close(sockfd);
+    pid_t pid = fork();
 
-    return 0;
+    if (pid == 0) {
+        /* child - listens for ACK, increments GL_LAR*/
+        char buf[DATASIZE];
+        addr_len = sizeof their_addr;
+        
+        
+        
+        
+        while (1) {
+            if ((numbytes = recvfrom(sockfd, buf, DATASIZE - 1, 0, (struct sockaddr *) &their_addr, &addr_len)) == -1) {
+                perror("recvfrom");
+                exit(1);
+            }
+            printf("Sender: ACK =  %s", buf);
+            if (strtol(buf, NULL, 10) == *LAR + 2) {
+                *LAR++;
+                printf(" = ok, LAR = %d\n", *LAR);
+            }
+
+        }
+    } else {
+        
+        
+        while (1) {
+
+            /* check if i can send data to receiver */
+            int LARtemp = *LAR;
+            while (GL_LFS - LARtemp < strtol(argv[3], NULL, 10)) {
+
+                
+
+                if ((numbytes = sendto(sockfd, frame_array[GL_LFS - LARtemp].data, DATASIZE, 0, p->ai_addr, p->ai_addrlen)) == -1) {
+                    perror("talker: sendto");
+                    exit(1);
+                }
+                GL_LFS++;
+                printf("sender: sent %d bytes to %s\n", numbytes, argv[1]);
+
+
+            }
+            
+            
+            
+            
+            
+
+            /* check if oldest sent has timed out */
+        }
+        close(sockfd);
+
+        return 0;
+    }
 }
