@@ -29,7 +29,10 @@ void *get_in_addr(struct sockaddr *sa) {
     return &(((struct sockaddr_in6*) sa)->sin6_addr);
 }
 
-int dropper() {
+/*DEPRECIATED AS PER ASSIGNMENT
+ * Asks if user wants to drop packet
+ */
+int dropper(int placeholder) {
     fprintf(stdout, "send ACK y/n?\n");
 
     int nbytes = 100;
@@ -41,6 +44,21 @@ int dropper() {
     if (my_string[0] == 'Y' || my_string[0] == 'y') {
         return 1;
     } else {
+        return 0;
+    }
+}
+/* Probability dropper
+ * 
+ * 100 represents no loss
+ * 50 = 50% loss
+ * 0 = 100% loss
+ */
+int dropper2(int probability){
+    srand(time(NULL));
+    if(rand()%101 < probability){
+        return 1;
+    } else {
+        fprintf(stderr, "Oops I did it again!\n");
         return 0;
     }
 }
@@ -57,7 +75,14 @@ int main(int argc, char *argv[])
     char buf[DATASIZE];
     socklen_t addr_len;
 
-
+    if (argc != 3) {
+        fprintf(stderr, "usage: PORT PROBABILITY\n");
+        exit(1);
+    }
+    
+    int probability = atoi(argv[2]);
+    
+    
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC; // set to AF_INET to force IPv4
     hints.ai_socktype = SOCK_DGRAM;
@@ -105,15 +130,12 @@ int main(int argc, char *argv[])
         int seq_id = 0;
         sscanf(buf, "%d", &seq_id);
 
-        /* is seq id correct? */
-
-        if (seq_id == expected_id) {
-
-            printf("%s", buf);
-            printf("receiver: good id, ok to send ACK?\n");
-
-            if (dropper()) {
-            expected_id++;
+        /* do i drop this packet? */
+        if (dropper2(probability)) {
+            /* good message */
+            if (seq_id == expected_id) {
+                printf("receiver: good id, message: %s", buf);
+                expected_id++;
                 /* convert seq_id back to str */
                 char ACK[DATASIZE];
                 snprintf(ACK, 10, "%d", seq_id);
@@ -124,11 +146,11 @@ int main(int argc, char *argv[])
                     perror("receiver: sendto");
                     exit(1);
                 }
+            } else if (seq_id > expected_id){
+                /* out of order print*/
+                printf("receiver: Out-of-order message: %s", buf);
             }
-        }
-
-
-        /*Send ACK*/
+        } 
     }
     close(sockfd);
 
