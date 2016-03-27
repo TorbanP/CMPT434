@@ -1,0 +1,32 @@
+
+# Student/Author   : Torban Peterson
+# NSID             : tjp873
+# Student No.      : 10924970
+# Course           : CMPT 434
+
+# Description      : Assignment 2
+
+#CC variable used to make GCC
+CC=gcc
+
+#UNAME appears again to flag the operation as windows or UNIX
+
+CFLAGS=-Wall -w
+
+
+LIB=-pthread
+
+.PHONY: all clean distclean
+
+
+all: udp
+
+udp: 
+	$(CC)  $(CFLAGS) $(LIB) sender.c -o sender
+	$(CC)  $(CFLAGS) $(LIB) receiver.c -o receiver
+
+
+clean:
+	rm -rf *.o *.dSYM sender receiver
+
+distclean: clean

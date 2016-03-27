@@ -1,0 +1,49 @@
+Torban Peterson
+10924970
+TJP873
+torban@torban.ca
+CMPT 434 - Assignment 2, Part A
+Mar 2, 2016
+
+NOTE: I was extreemly tight for time, i havent had time to do much testing. i only tested with the
+			parameters in the Usage section.
+
+Design
+ - sender
+  - similar to part a, except im using shared memory between child and parent to manage the state
+  	of each frame. the child marks a frame as complete once an ack is received, marking completion
+  	- the parent hunts for frames to send as needed, and once it has filled the window, it will look
+  		through active frames for timeouts, and shift back.
+  	- the code that is supposed to exit once all frames are sent doesnt seem to work, probably trivial
+  		fix but im out of time. it seems to inf loop after last frame
+    					
+	- receiver
+	 - similar to part a, but adds a buffer to store out-of-order packets.
+	 	- i should be restricting the members to be in-order+Nmax but i ran out of time to test that.
+	 	
+	 
+Functionality
+ - meets requirements given in assignment (i think)
+ 	- the assignment seems to push towards using stdin, but man that would be terrible for testing
+ 	- i hope you like the idea of using a FILE as i did. if you have some sort of testing script, just
+ 	- paste it in the data file and it will be read in.
+ - code should be fairly readable and short
+ 
+Limitations
+	- Compiler warnings -- yeah yeah yeah.... lots of compiler warnings but they make no sence, 
+		as online examples dont have problems.. bottom line is it works, and i cannot afford any more 
+		time on trying to fix them. i did code stepping, the strings are fine... idk...
+		
+	- my probability method isnt perfect when running at full speed
+		
+Usage
+
+	- data - contains lines of messages that i use FILE internally to load from. much better than getline
+	- make - makes the two .c files
+	
+	- sender (ip of receiver) (port) (window size) ( timeout-seconds)
+	- sender - ./sender 127.0.0.1 33333 5 3
+	
+	- receiver (port) (probability of packet success) (Nmax)
+	- receiver - ./receiver 33333 50 5
+

@@ -25,18 +25,16 @@
 #define SEQSIZE 6
 #define INITSEQID 0
 
-
+/* the state of a frame, ready = pending send, active = was sent, complete = was sent and ACK'd */
 enum state_id{
     READY,
     ACTIVE,
     COMPLETE
 };
 
-
 /* the message package & state details */
 typedef struct {
     char data[SEQSIZE + DATASIZE];
-    
     struct timeval sent;
 } frame;
 
@@ -148,7 +146,7 @@ int main(int argc, char *argv[]) {
                 perror("recvfrom");
                 exit(1);
             }
-            printf("Sender: ACK =  %s", buf);
+            printf("Sender: ACK =  %s\n", buf);
             
             shared_state[strtol(buf, NULL, 10)] = COMPLETE;
         }
@@ -181,41 +179,35 @@ int main(int argc, char *argv[]) {
                     }
                     /*set time of sent*/
                     gettimeofday(&(frame_array[j].sent), NULL);
-                    shared_state[j] == 1;
+                    shared_state[j] = ACTIVE;
                     active_frames++;
                     printf("sender: sent %d bytes to %s = %s", numbytes, argv[1], frame_array[j].data);
                 } else if (shared_state[j] == ACTIVE){
                     active_frames++;
                 } else {
-                    if (j >= lines){
+                    if (j > lines) {
                         break;
                     }
+                }
+                if (j >= lines) {
+                    break;
                 }
                 j++;
             }
 
-            shared_state[4] = READY;
-            printf("sender: state = %d\n", shared_state[4]);
-            shared_state[4] = ACTIVE;
-            printf("sender: state = %d\n", shared_state[4]);
-            shared_state[4] = COMPLETE;
-            printf("sender: state = %d\n", shared_state[4]);
-
-
-            /* check for any timed out packets*/
+            /* check for any timed out packets, reset them to READY if timed out*/
             j = 0;
             for (j = 0; j < lines; j++) {
-                printf("sender: timeout state = %d\n", shared_state[j]);
                 if (shared_state[j] == ACTIVE) {
                     gettimeofday(&stop, NULL);
-                    if ((stop.tv_sec - frame_array[j].sent.tv_sec) > timeout) {
-                        shared_state[j] == READY;
+                    struct timeval* temp_sent;
+                    temp_sent = &frame_array[j].sent; /* noob fix with issue accessing struct in struct */
+                    int timed_out = stop.tv_sec - temp_sent->tv_sec;
+                    if (timed_out > timeout) {
+                        shared_state[j] = READY;
                     }
                 }
             }
-
-
-
         }
         close(sockfd);
 

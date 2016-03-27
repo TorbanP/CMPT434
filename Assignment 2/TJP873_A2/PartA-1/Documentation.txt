@@ -1,0 +1,44 @@
+Torban Peterson
+10924970
+TJP873
+torban@torban.ca
+CMPT 434 - Assignment 2, Part A
+Mar 2, 2016
+
+
+Design
+ - sender
+  - threaded - child listens for ack and increments the LAR (last ack reply), parent sends frames 
+  						no locks are used as i dont see any race problems. i do use a LARtemp just incase though...
+    					use mmap to share the LAR with parent
+    					
+	- receiver
+	 - non threaded
+	 - increments the LFS (last frame sent)
+	 - implements rand, as well as the send ack Y thing as per assign but its not used. i used probability
+	 from the start as that is a less painful approach in regards to testing
+	 
+	- sequence number doesnt wrap with mod, probably not hard to implement but fine for thi
+	 
+Functionality
+ - meets all requirements given in assignment
+ - code should be fairly readable and short
+ 
+Limitations
+	- Compiler warnings -- yeah yeah yeah.... lots of compiler warnings but they make no sence, 
+		as online examples dont have problems.. bottom line is it works, and i cannot afford any more 
+		time on trying to fix them. i did code stepping, the strings are fine... idk...
+		
+	- my probability method isnt perfect when running at full speed
+		
+Usage
+
+	- data - contains lines of messages that i use FILE internally to load from. much better than getline
+	- make - makes the two .c files
+	
+	- sender (ip of receiver) (port) (window size) ( timeout-seconds)
+	- sender - ./sender 127.0.0.1 33333 5 3
+	
+	- receiver (port) (probability of packet success)
+	- receiver - ./receiver 33333 50
+
